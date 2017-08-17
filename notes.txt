@@ -1,0 +1,90 @@
+Given at timestep t:
+(x, y always in worldspace; s, d always in Frenet)
+
+EGO:
+- car_x
+- car_y
+- car_s
+- car_d
+- car_yaw (in degrees)
+- car_speed
+
+PATH PLANNER:
+// Previous path data given to the Planner
+- previous_path_x (vector<double>)
+- previous_path_y (vector<double>)
+// Previous path's end s and d values 
+- end_path_s
+- end_path_d
+
+TRAFFIC:
+a list of all other cars on the same side of the road.
+- sensor_fusion (vector<vector<double>>? [id, x, y, vx, vy, s, d])
+-- vx/vd in m/sec
+-- looks like only 12 cars are ever on our side of the road
+
+MAP:
+- map_waypoints_x
+- map_waypoints_y
+- map_waypoints_s
+- map_waypoints_dx
+- map_waypoints_dy
+// The max s value before wrapping around the track back to 0
+- max_s
+#########
+The highway is a total of 6 lanes, where there are 3 lanes on each side. Each lane is 4 m wide
+The d vector has a magnitude of 1 and points perpendicular to the road in the direction of the right hand side of the road. The d vector can be used to reference lane positions, for instance if you want to be in the middle lane at some way point just add the way points (x,y) with the d vector multiplied by 6 = (2+4), since each lane is 4 m.
+
+
+PROCESS:
+- figured out given data (above)
+- run small tests to make sure I understand how simulator interprets data
+-- just go straight
+-- follow center lane
+- for easier debugging, looked into doing simple data plots straight from C++
+-- matplotlibcpp
+-- plotting sensor fusion data into the environment cleared up where the other cars are located throughout he simulation (make sure they are not distributed all over the track)
+- using linear interpolation between waypoints to map s/d path to x/y coordinates lead to poor driving behavior
+-- resample map waypoints x/y/s at a frequency of one wp per meter (conveniently lines up with s)
+- fitting splines for the entire track was impractical
+-- lots of unnecessary data
+-- would require special treatment when starting a new lap and s coordinate flips from 6xxx to 0. Otherwise trajectory planning will break
+- Still getting extreme acceleration forces throughout visually smooth trajectory
+-- back to simple test case of following lane:
+   -> smooth driving, pop when path is updated and takes over. Pop was distinct with velocity dropping by 20+mph.
+      LAG ISSUE! Newly created path is picked up the simulator at least one timestep after sending it. With the path not matching the current position of the car anymore, the car then just snaps to the closest available waypoint, causing a jerk.
+-- Tested two approaches to smoothly transition into new trajectories
+--- blend old into new path smoothly over a given period. Greatly improved driving behavior with higher smoothing timesteps (went up to 100 / 2 seconds)
+--- re-use first waypoint of previous path, then compute x/y deltas from new path and add them iteratively. Perfectly smooth transitions! This does introduce a small margin of error over the course of the path which is at most slightly less than the distance the vehicle travels within 0.02 seconds.
+
+- Now to figure out how to get accurate velocity and acceleration in S and D for trajectory planning
+-- tried using first three values of previous path x/y. With the angle-based projection and tiny value changes per time step, using the provided function to convert to Frenet space becomes less exact the further out in the road the vehicle is. Not useful.
+-- good success with using predicted value for vel/acc from predicted path. Eyeballing the latency at update frequency (100 steps) + lag (2). All in clean Frenets, so no need for problematic conversions.
+-- eyeballing worked okay, but still caused acceleration overruns in vel d. tried a possibly more exact measure that also yielded more robust results.
+
+- Start implementing cost functions and states to start being able to navigate through traffic. Just keep lane for now.
+-- implement costs functions that immediately make a trajectory infeasible (collision, speed limit / forces exceeded)
+-- two states: go straight at max speed; go straight and follow lead vehicle
+
+- forum post: asking about an issue with spline fits for dx/dy along with a plot of all three lanes around the track.
+-- much easier way to get world space coordinates from frenet!! And I was still dealing with a small but noticeable amount of noise originating from the way the provided getXY() comes up with d (estimated angle projected out - which amplifies noise the further to the right we drive)
+-- quickly implemented... and much smoother overall result. Probably cut off ~0.5-1 unit of jerk at any given time.
+
+- time to turn on path planner
+-- finish implementing cost functions
+=> first successful test
+-- tweak weights
+
+- issue: car is in left/rightmost lane with traffic ahead and in center lane, while opposing lane is free. It'll be stuck in it's lane.
+-- recognize this configuration in the path planner and "nudge" towards center lane via cost scaling
+- issue: undesirably high velocity in tight left turns
+-- rough measure to recognize turns ahead in potential path and reduce speed on a sliding scale
+- if behind slower vehicle in middle lane and other traffic slightly further out, vehicle might change into lane with actually slower traffic ahead
+-- new cost function traffic_ahead_cost. Also proactively switches ouf of lanes with traffic further ahead.
+
+- guarantee that once lane change is planned, vehicle stays committed
+-- cur_plan variable
+
+There are some crappy drivers on that simulated road:
+- Crazy robots cutting me off and triggering an emergency brake (and exceeding force limits)
+- Traffic coming the other way briefly cross into my leftmost lane in the distance and triggering a lane change on my end
