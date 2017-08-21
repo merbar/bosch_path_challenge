@@ -293,19 +293,17 @@ int main() {
   	map_waypoints_dy.push_back(d_y);
   }
   
-  cout << map_waypoints_s.size();
-  
   // create object for ego vehicle;
   Vehicle ego_veh;
   
   // #################################
   // CONFIG
   // #################################
-  int horizon_global = 175; //200
+  int horizon_global = 175; //175
   int horizon = horizon_global;
-  int update_interval_global = 40; // update every second
+  int update_interval_global = 40; // update every second // 40
   int update_interval = update_interval_global;
-  double speed_limit_global = 47.5;
+  double speed_limit_global = 48;
   
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,
@@ -447,6 +445,7 @@ int main() {
             // get current position from past path, taking into account lag
             int lag = horizon - update_interval - previous_path_x.size();
             if (lag > 10) lag = 0; // sim start
+            
             // get last known car state
 //            vector<double> prev_car_s = ego_veh.get_s();
 //            vector<double> prev_car_d = ego_veh.get_d();            

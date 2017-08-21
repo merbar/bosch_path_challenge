@@ -4358,9 +4358,21 @@
             tool="1"
             flavor2="4">
       </item>
-      <item path="../src/Polynomial.cpp" ex="false" tool="1" flavor2="4">
+      <item path="../src/Polynomial.cpp" ex="false" tool="1" flavor2="8">
+        <ccTool flags="0">
+          <incDir>
+            <pElem>/usr/include/python2.7</pElem>
+            <pElem>../build</pElem>
+          </incDir>
+        </ccTool>
       </item>
-      <item path="../src/Vehicle.cpp" ex="false" tool="1" flavor2="4">
+      <item path="../src/Vehicle.cpp" ex="false" tool="1" flavor2="8">
+        <ccTool flags="0">
+          <incDir>
+            <pElem>/usr/include/python2.7</pElem>
+            <pElem>../build</pElem>
+          </incDir>
+        </ccTool>
       </item>
       <item path="../src/main.cpp" ex="false" tool="1" flavor2="8">
         <ccTool flags="0">
@@ -4370,7 +4382,13 @@
           </incDir>
         </ccTool>
       </item>
-      <item path="../src/polyTrajectoryGenerator.cpp" ex="false" tool="1" flavor2="4">
+      <item path="../src/polyTrajectoryGenerator.cpp" ex="false" tool="1" flavor2="8">
+        <ccTool flags="0">
+          <incDir>
+            <pElem>/usr/include/python2.7</pElem>
+            <pElem>../build</pElem>
+          </incDir>
+        </ccTool>
       </item>
     </conf>
   </confs>

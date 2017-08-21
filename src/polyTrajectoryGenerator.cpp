@@ -43,8 +43,14 @@ double PolyTrajectoryGenerator::collision_cost(pair<Polynomial, Polynomial> cons
       double ego_s = traj.first.eval(t);
       double ego_d = traj.second.eval(t);
       vector<double> traffic_state = vehicles[i].state_at(t); // {s,d}
-
-      double dif_s = abs(traffic_state[0] - ego_s);
+      
+      double dif_s = traffic_state[0] - ego_s;
+      // Ignore (potentially faster) vehicles from behind or that have fallen behind
+      // Tried it and ego moved out of their way, often hitting slower traffic. Not fun.
+      if (dif_s < -10)
+        break;
+      
+      dif_s = abs(dif_s);
       double dif_d = abs(traffic_state[1] - ego_d);
       
       // make the envelope a little wider to stay "out of trouble"
@@ -130,7 +136,7 @@ double PolyTrajectoryGenerator::traffic_ahead_cost(pair<Polynomial, Polynomial> 
   double ego_s = traj.first.eval(0);
   double ego_d = traj.second.eval(0);
   double ego_d_end = traj.second.eval(_horizon);
-  int look_ahead = 200;
+  int look_ahead = 250;
   
   int fut_lane_i = 0;
   if (ego_d_end > 8) fut_lane_i = 2;
@@ -186,7 +192,8 @@ double PolyTrajectoryGenerator::calculate_cost(pair<Polynomial, Polynomial> cons
   double acc_s_cost    = total_accel_s_cost(traj, goal, vehicles) * _cost_weights["acc_s_cost"];
   double acc_d_cost    = total_accel_d_cost(traj, goal, vehicles) * _cost_weights["acc_d_cost"];
   double jerk_cost     = total_jerk_cost(traj, goal, vehicles) * _cost_weights["jerk_cost"];
-  double lane_dep_cost = lane_depart_cost(traj, goal, vehicles) * _cost_weights["lane_dep_cost"];
+//  double lane_dep_cost = lane_depart_cost(traj, goal, vehicles) * _cost_weights["lane_dep_cost"];
+  double lane_dep_cost = 0.0;
   double traffic_cost  = traffic_ahead_cost(traj, goal, vehicles) * _cost_weights["traffic_cost"];
   
   vector<double> cost_vec = {tr_buf_cost, eff_cost, acc_s_cost, acc_d_cost, jerk_cost, lane_dep_cost, traffic_cost};
@@ -321,170 +328,180 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     }
   }
   
-  // #########################################
-  // GENERATE GOALPOINTS
-  // #########################################
-  // GO STRAIGHT
-  if (go_straight) {
-    double goal_s_pos = start_s[0] + _delta_s_maxspeed;
-    double goal_s_vel = _max_dist_per_timestep;
-    double goal_s_acc = 0.0;
-    double goal_d_pos = 2 + 4 * cur_lane_i;
-    double goal_d_vel = 0.0;
-    double goal_d_acc = 0.0;
-    vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
-    vector<vector<double>> goal_points_straight = {goal_vec};
-    perturb_goal(goal_vec, goal_points_straight);
-    // add to goal points
-    goal_points.reserve(goal_points.size() + goal_points_straight.size());
-    goal_points.insert(goal_points.end(),goal_points_straight.begin(),goal_points_straight.end());
-  }
-  
-  // FOLLOW OTHER VEHICLE
-  if (go_straight_follow_lead) {
-    vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
-    
-    // "EMERGENCY BREAK ASSIST" to the drive assist
-    // if much slower vehicle pulls into lane dangerously close in front of us,
-    if (((lead_s[0] - start_s[0]) < _col_buf_length * 0.5) && (lead_s[1] < start_s[1] * 0.8)) {
-      cout << "EMERGENCY" << endl;
-      // reducing horizon to reduce speed faster
-      _current_action = "emergency";
-      _horizon = 120;
-      // and hold lane - getting forced into other lane in a small horizon will exceed force limits
-      change_left = false;
-      change_right = false;
-    }      
-    double goal_s_pos = start_s[0] + lead_s[1] * _horizon;
-    double goal_s_vel = lead_s[1];
-    double goal_s_acc = 0.0;
-    double goal_d_pos = 2 + 4 * cur_lane_i;
-    double goal_d_vel = 0.0;
-    double goal_d_acc = 0.0;
-    vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
-    vector<vector<double>> goal_points_follow = {goal_vec};
-    perturb_goal(goal_vec, goal_points_follow);
-    // add to goal points
-    goal_points.reserve(goal_points.size() + goal_points_follow.size());
-    goal_points.insert(goal_points.end(),goal_points_follow.begin(),goal_points_follow.end());
-  }
-  
-  // CHANGE LANE LEFT
-  if (change_left && (cur_lane_i != 0)) {
-    double goal_s_pos = start_s[0] + _delta_s_maxspeed;
-    double goal_s_vel = _max_dist_per_timestep;
-    // less aggressive lane change if we are already following
-    if (go_straight_follow_lead) {
-      vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
-      // but only if following closely
-      if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
-        goal_s_pos = start_s[0] + lead_s[1] * _horizon;
-        goal_s_vel = lead_s[1];
-      }
-    }
-    double goal_s_acc = 0.0;
-    double goal_d_pos = (2 + 4 * cur_lane_i) - 4;
-    double goal_d_vel = 0.0;
-    double goal_d_acc = 0.0;
-    vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
-    vector<vector<double>> goal_points_left = {goal_vec};
-    perturb_goal(goal_vec, goal_points_left, true);
-    // add to goal points
-    goal_points.reserve(goal_points.size() + goal_points_left.size());
-    goal_points.insert(goal_points.end(),goal_points_left.begin(),goal_points_left.end());
-  }
-  
-  // CHANGE LANE RIGHT
-  if (change_right && (cur_lane_i != 2)) {
-    double goal_s_pos = start_s[0] + _delta_s_maxspeed;
-    double goal_s_vel = _max_dist_per_timestep;
-    // less aggressive lane change if we are already following
-    if (go_straight_follow_lead) {
-      vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
-      // but only if following closely
-      if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
-        goal_s_pos = start_s[0] + lead_s[1] * _horizon;
-        goal_s_vel = lead_s[1];
-      }
-    }
-    double goal_s_acc = 0.0;
-    double goal_d_pos = (2 + 4 * cur_lane_i) + 4;
-    double goal_d_vel = 0.0;
-    double goal_d_acc = 0.0;
-    vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
-    vector<vector<double>> goal_points_right = {goal_vec};
-    perturb_goal(goal_vec, goal_points_right);
-    // add to goal points
-    goal_points.reserve(goal_points.size() + goal_points_right.size());
-    goal_points.insert(goal_points.end(),goal_points_right.begin(),goal_points_right.end());
-  }
-  // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  // END - GENERATE GOALPOINTS
-  // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
-  cout << "PLAN: ";
-  if (go_straight)
-    cout << " :GO STRAIGHT: ";
-  if (go_straight_follow_lead)
-    cout << " :FOLLOW LEAD: ";
-  if (change_left)
-    cout << " :CHANGE LEFT: ";
-  if (change_right)
-    cout << " :CHANGE RIGHT: ";
-  cout << endl;
-  
-  // #########################################
-  // JERK MINIMIZED TRAJECTORIES
-  // #########################################
-  vector<pair<Polynomial, Polynomial>> trajectory_coefficients;
-  for (vector<double> goal : goal_points) {
-    vector<double> goal_s = {goal[0], goal[1], goal[2]};
-    vector<double> goal_d = {goal[3], goal[4], goal[5]};
-    // ignore goal points that are out of bounds
-    if ((goal[3] > 1.0) && (goal[3] < 11.0)) {      
-      Polynomial traj_s_poly = jmt(start_s, goal_s, _horizon);
-      Polynomial traj_d_poly = jmt(start_d, goal_d, _horizon);
-      trajectory_coefficients.push_back(std::make_pair(traj_s_poly, traj_d_poly));
-      traj_goals.push_back({goal[0], goal[1], goal[2], goal[3], goal[4], goal[5]});
-    }     
-  }
-  // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  // END - JERK MINIMIZED TRAJECTORIES
-  // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
-  // ################################
-  // COMPUTE COST FOR EACH TRAJECTORY
-  // ################################
-  vector<vector<double>> all_costs;
-  for (int i = 0; i < trajectory_coefficients.size(); i++) {
-    double cost = calculate_cost(trajectory_coefficients[i], traj_goals[i], vehicles, all_costs);
-    // if appropriate, scale costs for trajectories going to the middle lane
-    if (prefer_mid_lane && (abs(6 - trajectory_coefficients[i].second.eval(_horizon)) < 1.0))
-      cost *= 0.5;
-    traj_costs.push_back(cost);
-  }
-    
-  // choose least-cost trajectory
-  double min_cost = traj_costs[0];
+  double min_cost = 999999;
   int min_cost_i = 0;
-  for (int i = 1; i < trajectory_coefficients.size(); i++) {
-    if (traj_costs[i] < min_cost) {
-      min_cost = traj_costs[i];
-      min_cost_i = i;
+  vector<vector<double>> all_costs;
+  vector<pair<Polynomial, Polynomial>> trajectory_coefficients;
+  while (min_cost == 999999) {
+    min_cost_i = 0;
+    goal_points.clear();
+    // #########################################
+    // GENERATE GOALPOINTS
+    // #########################################
+    // GO STRAIGHT
+    if (go_straight) {
+      double goal_s_pos = start_s[0] + _delta_s_maxspeed;
+      double goal_s_vel = _max_dist_per_timestep;
+      double goal_s_acc = 0.0;
+      double goal_d_pos = 2 + 4 * cur_lane_i;
+      double goal_d_vel = 0.0;
+      double goal_d_acc = 0.0;
+      vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};    
+      vector<vector<double>> goal_points_straight = {goal_vec};
+      perturb_goal(goal_vec, goal_points_straight);
+      // add to goal points
+      goal_points.reserve(goal_points.size() + goal_points_straight.size());
+      goal_points.insert(goal_points.end(),goal_points_straight.begin(),goal_points_straight.end());
     }
-  }
-  // rare edge case: vehicle is stuck in infeasible trajectory (usually stuck close behind other car)
-  if (min_cost == 999999) {
-    double min_s = trajectory_coefficients[0].first.eval(_horizon);
-    int min_s_i = 0;
-    // find trajectory going straight with minimum s
-    for (int i = 1; i < _goal_perturb_samples; i++) {
-      if (trajectory_coefficients[i].first.eval(_horizon) < min_s){
-        min_s = trajectory_coefficients[i].first.eval(_horizon);
-        min_s_i = i;
+
+    // FOLLOW OTHER VEHICLE
+    if (go_straight_follow_lead) {
+      vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
+
+      // "EMERGENCY BREAK ASSIST" to the drive assist
+      // if much slower vehicle pulls into lane dangerously close in front of us,
+//      if (((lead_s[0] - start_s[0]) < _col_buf_length * 0.5) && (lead_s[1] < start_s[1] * 0.8)) {
+//        cout << "EMERGENCY" << endl;
+//        // reducing horizon to reduce speed faster
+//        _current_action = "emergency";
+//        _horizon = 120;
+//        // and hold lane - getting forced into other lane in a small horizon will exceed force limits
+//        change_left = false;
+//        change_right = false;
+//      }      
+      double goal_s_pos = start_s[0] + lead_s[1] * _horizon;
+      double goal_s_vel = lead_s[1];
+      double goal_s_acc = 0.0;
+      double goal_d_pos = 2 + 4 * cur_lane_i;
+      double goal_d_vel = 0.0;
+      double goal_d_acc = 0.0;
+      vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
+      vector<vector<double>> goal_points_follow = {goal_vec};
+      perturb_goal(goal_vec, goal_points_follow);
+      // add to goal points
+      goal_points.reserve(goal_points.size() + goal_points_follow.size());
+      goal_points.insert(goal_points.end(),goal_points_follow.begin(),goal_points_follow.end());
+    }
+
+    // CHANGE LANE LEFT
+    if (change_left && (cur_lane_i != 0)) {
+      double goal_s_pos = start_s[0] + _delta_s_maxspeed - 1;
+      double goal_s_vel = _max_dist_per_timestep;
+      // less aggressive lane change if we are already following
+      if (go_straight_follow_lead) {
+        vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
+        // but only if following closely
+        if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
+          goal_s_pos = start_s[0] + lead_s[1] * _horizon;
+          goal_s_vel = lead_s[1];
+        }
+      }
+      double goal_s_acc = 0.0;
+      double goal_d_pos = (2 + 4 * cur_lane_i) - 4;
+      double goal_d_vel = 0.0;
+      double goal_d_acc = 0.0;
+      vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
+      vector<vector<double>> goal_points_left = {goal_vec};
+      perturb_goal(goal_vec, goal_points_left, true);
+      // add to goal points
+      goal_points.reserve(goal_points.size() + goal_points_left.size());
+      goal_points.insert(goal_points.end(),goal_points_left.begin(),goal_points_left.end());
+    }
+
+    // CHANGE LANE RIGHT
+    if (change_right && (cur_lane_i != 2)) {
+      double goal_s_pos = start_s[0] + _delta_s_maxspeed - 1;
+      double goal_s_vel = _max_dist_per_timestep;
+      // less aggressive lane change if we are already following
+      if (go_straight_follow_lead) {
+        vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
+        // but only if following closely
+        if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
+          goal_s_pos = start_s[0] + lead_s[1] * _horizon;
+          goal_s_vel = lead_s[1];
+        }
+      }
+      double goal_s_acc = 0.0;
+      double goal_d_pos = (2 + 4 * cur_lane_i) + 4;
+      double goal_d_vel = 0.0;
+      double goal_d_acc = 0.0;
+      vector<double> goal_vec = {goal_s_pos, goal_s_vel, goal_s_acc, goal_d_pos, goal_d_vel, goal_d_acc};
+      vector<vector<double>> goal_points_right = {goal_vec};
+      perturb_goal(goal_vec, goal_points_right);
+      // add to goal points
+      goal_points.reserve(goal_points.size() + goal_points_right.size());
+      goal_points.insert(goal_points.end(),goal_points_right.begin(),goal_points_right.end());
+    }
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // END - GENERATE GOALPOINTS
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    cout << "PLAN: ";
+    if (go_straight)
+      cout << " :GO STRAIGHT: ";
+    if (go_straight_follow_lead)
+      cout << " :FOLLOW LEAD: ";
+    if (change_left)
+      cout << " :CHANGE LEFT: ";
+    if (change_right)
+      cout << " :CHANGE RIGHT: ";
+    cout << endl;
+
+    // #########################################
+    // JERK MINIMIZED TRAJECTORIES
+    // #########################################
+    trajectory_coefficients.clear();
+    for (vector<double> goal : goal_points) {
+      vector<double> goal_s = {goal[0], goal[1], goal[2]};
+      vector<double> goal_d = {goal[3], goal[4], goal[5]};
+      // ignore goal points that are out of bounds
+      if ((goal[3] > 1.0) && (goal[3] < 11.0)) {      
+        Polynomial traj_s_poly = jmt(start_s, goal_s, _horizon);
+        Polynomial traj_d_poly = jmt(start_d, goal_d, _horizon);
+        trajectory_coefficients.push_back(std::make_pair(traj_s_poly, traj_d_poly));
+        traj_goals.push_back({goal[0], goal[1], goal[2], goal[3], goal[4], goal[5]});
+      }     
+    }
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // END - JERK MINIMIZED TRAJECTORIES
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    // ################################
+    // COMPUTE COST FOR EACH TRAJECTORY
+    // ################################
+    all_costs.clear();
+    for (int i = 0; i < trajectory_coefficients.size(); i++) {
+      double cost = calculate_cost(trajectory_coefficients[i], traj_goals[i], vehicles, all_costs);
+      // if appropriate, scale costs for trajectories going to the middle lane
+      if (prefer_mid_lane && (abs(6 - trajectory_coefficients[i].second.eval(_horizon)) < 1.0))
+        cost *= 0.5;
+      traj_costs.push_back(cost);
+    }
+
+    // choose least-cost trajectory
+    min_cost = traj_costs[0];
+    for (int i = 1; i < trajectory_coefficients.size(); i++) {
+      if (traj_costs[i] < min_cost) {
+        min_cost = traj_costs[i];
+        min_cost_i = i;
       }
     }
-    min_cost_i = min_s_i;
+//     rare edge case: vehicle is stuck in infeasible trajectory
+    if (min_cost == 999999) {
+      change_left = true;
+      change_right = true;
+      cout << "PLANNER: COULDN'T FIND PATH" << endl;
+//      double min_s = trajectory_coefficients[0].first.eval(_horizon);
+//      int min_s_i = 0;
+//      // find trajectory going straight with minimum s
+//      for (int i = 1; i < _goal_perturb_samples; i++) {
+//        if (trajectory_coefficients[i].first.eval(_horizon) < min_s){
+//          min_s = trajectory_coefficients[i].first.eval(_horizon);
+//          min_s_i = i;
+//        }
+//      }
+//      min_cost_i = min_s_i;
+    }
   }
   
   _current_action = "straight";
