@@ -301,7 +301,7 @@ int main() {
   // #################################
   int horizon_global = 175; //175
   int horizon = horizon_global;
-  int update_interval_global = 20; // update every second // 40
+  int update_interval_global = 10; // update every second // 40
   int update_interval = update_interval_global;
   double speed_limit_global = 48.5;
   

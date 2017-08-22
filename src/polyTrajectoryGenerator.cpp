@@ -293,6 +293,25 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     if (abs(closest_veh_s[0] - start_s[0]) < 100) {
       change_left = true;
       change_right = true;
+      // do not change lane if:
+      // - ego is in middle lane AND
+      // - traffic in new lane AND
+      // - not faster than current lane AND fairly close to traffic in current lane
+      if (cur_lane_i == 1) { 
+        // left change
+        if (closest_veh_i[0] != -1) {
+          vector<double> closest_veh_left = vehicles[closest_veh_i[0]].get_s();
+          if ((closest_veh_s[1] >= closest_veh_left[1]) && (closest_veh_left[0] <  closest_veh_s[0] + 100)) {
+            change_left = false;
+          }
+        }
+        if (closest_veh_i[2] != -1) {
+          vector<double> closest_veh_right = vehicles[closest_veh_i[2]].get_s();
+          if ((closest_veh_s[1] >= closest_veh_right[1]) && (closest_veh_right[0] <  closest_veh_s[0] + 100)) {
+            change_right = false;
+          }
+        }        
+      }
     }
     // there is a vehicle close ahead    
     if (abs(closest_veh_s[0] - start_s[0]) < _col_buf_length) {
@@ -336,6 +355,7 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
   int min_cost_i = 0;
   vector<vector<double>> all_costs;
   vector<pair<Polynomial, Polynomial>> trajectory_coefficients;
+  int path_fail_count = 0;
   while (min_cost == 999999) {
     min_cost_i = 0;
     goal_points.clear();
@@ -386,12 +406,16 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       goal_points.reserve(goal_points.size() + goal_points_follow.size());
       goal_points.insert(goal_points.end(),goal_points_follow.begin(),goal_points_follow.end());
     }
-
-    // CHANGE LANE LEFT
+    
     double lane_change_slowdown = 0.975;
+    double cur_speed_fac = start_s[1] / _max_dist_per_timestep;
+    if (cur_speed_fac > 0.85) cur_speed_fac = 1.0;
+    // CHANGE LANE LEFT
     if (change_left && (cur_lane_i != 0)) {
-      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown;
-      double goal_s_vel = _max_dist_per_timestep * lane_change_slowdown;
+//      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown * cur_speed_fac;
+//      double goal_s_vel = _max_dist_per_timestep * lane_change_slowdown * cur_speed_fac;
+      double goal_s_pos = start_s[0] + start_s[1] * _horizon * lane_change_slowdown;
+      double goal_s_vel = start_s[1] * lane_change_slowdown;
       // less aggressive lane change if we are already following
       if (go_straight_follow_lead) {
         vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
@@ -415,8 +439,10 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
 
     // CHANGE LANE RIGHT
     if (change_right && (cur_lane_i != 2)) {
-      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown;
-      double goal_s_vel = _max_dist_per_timestep * lane_change_slowdown;
+//      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown * cur_speed_fac;
+//      double goal_s_vel = _max_dist_per_timestep * lane_change_slowdown * cur_speed_fac;
+      double goal_s_pos = start_s[0] + start_s[1] * _horizon * lane_change_slowdown;
+      double goal_s_vel = start_s[1] * lane_change_slowdown;
       // less aggressive lane change if we are already following
       if (go_straight_follow_lead) {
         vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
@@ -456,6 +482,7 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     // JERK MINIMIZED TRAJECTORIES
     // #########################################
     trajectory_coefficients.clear();
+    traj_goals.clear();
     for (vector<double> goal : goal_points) {
       vector<double> goal_s = {goal[0], goal[1], goal[2]};
       vector<double> goal_d = {goal[3], goal[4], goal[5]};
@@ -475,10 +502,11 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     // COMPUTE COST FOR EACH TRAJECTORY
     // ################################
     all_costs.clear();
+    traj_costs.clear();
     for (int i = 0; i < trajectory_coefficients.size(); i++) {
       double cost = calculate_cost(trajectory_coefficients[i], traj_goals[i], vehicles, all_costs);
       // if appropriate, scale costs for trajectories going to the middle lane
-      if (prefer_mid_lane) {
+      if (prefer_mid_lane && (cost != 999999)) {
         // if we are currently not in middle lane AND trajectory takes us into middle lane
         if ((abs(6 - trajectory_coefficients[i].second.eval(0)) > 1.0) && (abs(6 - trajectory_coefficients[i].second.eval(_horizon)) < 1.0)) {
           cost *= 0.75;
@@ -497,9 +525,16 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     }
 //     rare edge case: vehicle is stuck in infeasible trajectory
     if (min_cost == 999999) {
+      path_fail_count += 1;
       change_left = true;
       change_right = true;
+      go_straight_follow_lead = true;
       cout << "PLANNER: COULDN'T FIND PATH" << endl;
+      
+      if (path_fail_count > 2) {
+        min_cost = 99998;
+        min_cost_i = 0;
+      }
 //      double min_s = trajectory_coefficients[0].first.eval(_horizon);
 //      int min_s_i = 0;
 //      // find trajectory going straight with minimum s
@@ -513,9 +548,7 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     }
   }
   
-  _current_action = "straight";
-  if (min_cost_i > _goal_perturb_samples)
-    _current_action = "lane_change";  
+  
   
   cout << "cost: " << traj_costs[min_cost_i] << " - i: " << min_cost_i << endl;
   cout << "traffic buffer cost: " << all_costs[min_cost_i][0] << endl;
@@ -535,6 +568,10 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       traj_s[t] = trajectory_coefficients[min_cost_i].first.eval(t);
       traj_d[t] = trajectory_coefficients[min_cost_i].second.eval(t);
   }
+  
+  _current_action = "straight";
+  if (abs(traj_d[0] - traj_d[_horizon-1]) > 2.0)
+    _current_action = "lane_change";
   
   vector<vector<double>> new_traj(2);
   new_traj[0] = traj_s;
