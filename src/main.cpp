@@ -301,9 +301,9 @@ int main() {
   // #################################
   int horizon_global = 175; //175
   int horizon = horizon_global;
-  int update_interval_global = 40; // update every second // 40
+  int update_interval_global = 20; // update every second // 40
   int update_interval = update_interval_global;
-  double speed_limit_global = 48;
+  double speed_limit_global = 48.5;
   
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,
@@ -424,13 +424,14 @@ int main() {
             if (dx_dif >= 0.1) {
               if (cur_lane_i == 2) { // right lane
                 // worst: 0.1 => 25% speed reduction
-                double scale_factor = 0.72 + (0.28 * (1 - (dx_dif - 0.04) * 0.5));
+                double scale_factor = 0.9 + (0.1 * (1 - (dx_dif - 0.04) * 0.5));
                 speed_limit *= scale_factor;
               } else if (cur_lane_i == 1) { // center lane
-                double scale_factor = 0.80 + (0.2 * (1 - (dx_dif - 0.04) * 0.5));
+                double scale_factor = 0.95 + (0.05 * (1 - (dx_dif - 0.04) * 0.5));
                 speed_limit *= scale_factor;
               } else { // left lane
-                double scale_factor = 0.92 + (0.08 * (1 - (dx_dif - 0.04) * 0.5));
+//                double scale_factor = 0.92 + (0.08 * (1 - (dx_dif - 0.04) * 0.5));
+                double scale_factor = 1.0;
                 speed_limit *= scale_factor;
               }
             }

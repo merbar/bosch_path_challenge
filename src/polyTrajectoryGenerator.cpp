@@ -38,8 +38,8 @@ double PolyTrajectoryGenerator::exceeds_jerk_cost(pair<Polynomial, Polynomial> c
 }
 
 double PolyTrajectoryGenerator::collision_cost(pair<Polynomial, Polynomial> const &traj, vector<double> const &goal, vector<Vehicle> const &vehicles) {
-  for (int t = 0; t < _horizon; t++) {
-    for (int i = 0; i < vehicles.size(); i++) {
+  for (int i = 0; i < vehicles.size(); i++) {
+    for (int t = 0; t < _horizon; t++) {
       double ego_s = traj.first.eval(t);
       double ego_d = traj.second.eval(t);
       vector<double> traffic_state = vehicles[i].state_at(t); // {s,d}
@@ -136,7 +136,7 @@ double PolyTrajectoryGenerator::traffic_ahead_cost(pair<Polynomial, Polynomial> 
   double ego_s = traj.first.eval(0);
   double ego_d = traj.second.eval(0);
   double ego_d_end = traj.second.eval(_horizon);
-  int look_ahead = 250;
+  int look_ahead = 400;
   
   int fut_lane_i = 0;
   if (ego_d_end > 8) fut_lane_i = 2;
@@ -192,8 +192,8 @@ double PolyTrajectoryGenerator::calculate_cost(pair<Polynomial, Polynomial> cons
   double acc_s_cost    = total_accel_s_cost(traj, goal, vehicles) * _cost_weights["acc_s_cost"];
   double acc_d_cost    = total_accel_d_cost(traj, goal, vehicles) * _cost_weights["acc_d_cost"];
   double jerk_cost     = total_jerk_cost(traj, goal, vehicles) * _cost_weights["jerk_cost"];
-//  double lane_dep_cost = lane_depart_cost(traj, goal, vehicles) * _cost_weights["lane_dep_cost"];
-  double lane_dep_cost = 0.0;
+  double lane_dep_cost = lane_depart_cost(traj, goal, vehicles) * _cost_weights["lane_dep_cost"];
+//  double lane_dep_cost = 0.0;
   double traffic_cost  = traffic_ahead_cost(traj, goal, vehicles) * _cost_weights["traffic_cost"];
   
   vector<double> cost_vec = {tr_buf_cost, eff_cost, acc_s_cost, acc_d_cost, jerk_cost, lane_dep_cost, traffic_cost};
@@ -309,23 +309,27 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
   //   which is a transition it would otherwise not make
   bool prefer_mid_lane = false;
   if ((cur_lane_i == 0) || (cur_lane_i == 2)) {
-    vector<double> closest_veh_s_curLane = vehicles[closest_veh_i[cur_lane_i]].get_s();
-    vector<double> closest_veh_s_midLane = vehicles[closest_veh_i[1]].get_s();
-    vector<double> closest_veh_s_opLane = vehicles[closest_veh_i[abs(cur_lane_i - 2)]].get_s();
+    prefer_mid_lane = true;
+    change_right = true;
+    change_left = true;
+    
+//    vector<double> closest_veh_s_curLane = vehicles[closest_veh_i[cur_lane_i]].get_s();
+//    vector<double> closest_veh_s_midLane = vehicles[closest_veh_i[1]].get_s();
+//    vector<double> closest_veh_s_opLane = vehicles[closest_veh_i[abs(cur_lane_i - 2)]].get_s();
     // traffic in current lane
-    if (abs(closest_veh_s_curLane[0] - start_s[0]) <  2 * _col_buf_length) {
-      // traffic in middle lane
-      if (abs(closest_veh_s_midLane[0] - start_s[0]) <  2 * _col_buf_length) {
-      // no traffic on opposite lane
-        if (abs(closest_veh_s_opLane[0] - start_s[0]) >  4 * _col_buf_length) {
-          prefer_mid_lane = true;
-          if (cur_lane_i == 0)
-            change_right = true;
-          else
-            change_left = true;
-        }
-      }
-    }
+//    if (abs(closest_veh_s_curLane[0] - start_s[0]) <  4 * _col_buf_length) {
+//      // traffic in middle lane
+//      if (abs(closest_veh_s_midLane[0] - start_s[0]) <  4 * _col_buf_length) {
+//      // no traffic on opposite lane
+//        if (abs(closest_veh_s_opLane[0] - start_s[0]) >  8 * _col_buf_length) {
+//          prefer_mid_lane = true;
+//          if (cur_lane_i == 0)
+//            change_right = true;
+//          else
+//            change_left = true;
+//        }
+//      }
+//    }
   }
   
   double min_cost = 999999;
@@ -384,17 +388,18 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     }
 
     // CHANGE LANE LEFT
+    double lane_change_slowdown = 0.975;
     if (change_left && (cur_lane_i != 0)) {
-      double goal_s_pos = start_s[0] + _delta_s_maxspeed - 1;
-      double goal_s_vel = _max_dist_per_timestep;
+      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown;
+      double goal_s_vel = _max_dist_per_timestep * lane_change_slowdown;
       // less aggressive lane change if we are already following
       if (go_straight_follow_lead) {
         vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
         // but only if following closely
-        if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
+//        if (lead_s[0] - start_s[0] < _col_buf_length * 1.0) {
           goal_s_pos = start_s[0] + lead_s[1] * _horizon;
           goal_s_vel = lead_s[1];
-        }
+//        }
       }
       double goal_s_acc = 0.0;
       double goal_d_pos = (2 + 4 * cur_lane_i) - 4;
@@ -410,16 +415,16 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
 
     // CHANGE LANE RIGHT
     if (change_right && (cur_lane_i != 2)) {
-      double goal_s_pos = start_s[0] + _delta_s_maxspeed - 1;
-      double goal_s_vel = _max_dist_per_timestep;
+      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown;
+      double goal_s_vel = _max_dist_per_timestep * lane_change_slowdown;
       // less aggressive lane change if we are already following
       if (go_straight_follow_lead) {
         vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
         // but only if following closely
-        if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
+//        if (lead_s[0] - start_s[0] < _col_buf_length * 0.5) {
           goal_s_pos = start_s[0] + lead_s[1] * _horizon;
           goal_s_vel = lead_s[1];
-        }
+//        }
       }
       double goal_s_acc = 0.0;
       double goal_d_pos = (2 + 4 * cur_lane_i) + 4;
@@ -473,8 +478,12 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
     for (int i = 0; i < trajectory_coefficients.size(); i++) {
       double cost = calculate_cost(trajectory_coefficients[i], traj_goals[i], vehicles, all_costs);
       // if appropriate, scale costs for trajectories going to the middle lane
-      if (prefer_mid_lane && (abs(6 - trajectory_coefficients[i].second.eval(_horizon)) < 1.0))
-        cost *= 0.5;
+      if (prefer_mid_lane) {
+        // if we are currently not in middle lane AND trajectory takes us into middle lane
+        if ((abs(6 - trajectory_coefficients[i].second.eval(0)) > 1.0) && (abs(6 - trajectory_coefficients[i].second.eval(_horizon)) < 1.0)) {
+          cost *= 0.75;
+        }
+      }
       traj_costs.push_back(cost);
     }
 

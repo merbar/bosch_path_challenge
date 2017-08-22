@@ -54,7 +54,7 @@ private:
     const double _car_col_width = 0.5 * _car_width;
     const double _car_col_length = 0.5 * _car_length;
     const double _col_buf_width = _car_width;
-    const double _col_buf_length = 6 * _car_length;
+    const double _col_buf_length = 4 * _car_length;
     const int _goal_perturb_samples = 10;
     int _horizon = 0;
     const double _hard_max_vel_per_timestep = 0.00894 * 49.5; // 50 mp/h and a little buffer
@@ -69,7 +69,7 @@ private:
                                             {"acc_s_cost", 10.0},
                                             {"acc_d_cost", 10.0},
                                             {"jerk_cost", 10.0},
-                                            {"lane_dep_cost", 0.05},
+                                            {"lane_dep_cost", 0.015},
                                             {"traffic_cost", 10.0},
                                             };
 };
