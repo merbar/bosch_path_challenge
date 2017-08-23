@@ -47,7 +47,7 @@ double PolyTrajectoryGenerator::collision_cost(pair<Polynomial, Polynomial> cons
       double dif_s = traffic_state[0] - ego_s;
       // Ignore (potentially faster) vehicles from behind or that have fallen behind
       // Tried it and ego moved out of their way, often hitting slower traffic. Not fun.
-      if (dif_s < -10)
+      if (dif_s < -5)
         break;
       
       dif_s = abs(dif_s);
@@ -301,20 +301,20 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
         // left change
         if (closest_veh_i[0] != -1) {
           vector<double> closest_veh_left = vehicles[closest_veh_i[0]].get_s();
-          if ((closest_veh_s[1] >= closest_veh_left[1]) && (closest_veh_left[0] <  closest_veh_s[0] + 100)) {
+          if ((closest_veh_s[1] * 1.025 >= closest_veh_left[1]) && (closest_veh_left[0] <  closest_veh_s[0] + 60)) {
             change_left = false;
           }
         }
         if (closest_veh_i[2] != -1) {
           vector<double> closest_veh_right = vehicles[closest_veh_i[2]].get_s();
-          if ((closest_veh_s[1] >= closest_veh_right[1]) && (closest_veh_right[0] <  closest_veh_s[0] + 100)) {
+          if ((closest_veh_s[1] * 1.025 >= closest_veh_right[1]) && (closest_veh_right[0] <  closest_veh_s[0] + 60)) {
             change_right = false;
           }
         }        
       }
     }
     // there is a vehicle close ahead    
-    if (abs(closest_veh_s[0] - start_s[0]) < _col_buf_length) {
+    if (abs(closest_veh_s[0] - start_s[0]) < _col_buf_length * 1.3) {
       go_straight = false;
       go_straight_follow_lead = true;
       change_left = true;
@@ -407,9 +407,7 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       goal_points.insert(goal_points.end(),goal_points_follow.begin(),goal_points_follow.end());
     }
     
-    double lane_change_slowdown = 0.975;
-    double cur_speed_fac = start_s[1] / _max_dist_per_timestep;
-    if (cur_speed_fac > 0.85) cur_speed_fac = 1.0;
+    double lane_change_slowdown = 0.98;
     // CHANGE LANE LEFT
     if (change_left && (cur_lane_i != 0)) {
 //      double goal_s_pos = start_s[0] + _delta_s_maxspeed * lane_change_slowdown * cur_speed_fac;
@@ -417,14 +415,14 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       double goal_s_pos = start_s[0] + start_s[1] * _horizon * lane_change_slowdown;
       double goal_s_vel = start_s[1] * lane_change_slowdown;
       // less aggressive lane change if we are already following
-      if (go_straight_follow_lead) {
-        vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
-        // but only if following closely
-//        if (lead_s[0] - start_s[0] < _col_buf_length * 1.0) {
-          goal_s_pos = start_s[0] + lead_s[1] * _horizon;
-          goal_s_vel = lead_s[1];
+//      if (go_straight_follow_lead) {
+//        vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
+//        // but only if following closely
+////        if (lead_s[0] - start_s[0] < _col_buf_length * 1.0) {
+//          goal_s_pos = start_s[0] + lead_s[1] * _horizon;
+//          goal_s_vel = lead_s[1];
 //        }
-      }
+//      }
       double goal_s_acc = 0.0;
       double goal_d_pos = (2 + 4 * cur_lane_i) - 4;
       double goal_d_vel = 0.0;
@@ -509,7 +507,7 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       if (prefer_mid_lane && (cost != 999999)) {
         // if we are currently not in middle lane AND trajectory takes us into middle lane
         if ((abs(6 - trajectory_coefficients[i].second.eval(0)) > 1.0) && (abs(6 - trajectory_coefficients[i].second.eval(_horizon)) < 1.0)) {
-          cost *= 0.75;
+          cost *= 0.6;
         }
       }
       traj_costs.push_back(cost);
@@ -531,9 +529,19 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       go_straight_follow_lead = true;
       cout << "PLANNER: COULDN'T FIND PATH" << endl;
       
+      // if it fails frequently, invoke slowdown
       if (path_fail_count > 2) {
-        min_cost = 99998;
-        min_cost_i = 0;
+        if (go_straight_follow_lead) {
+          vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
+          max_speed = lead_s[1];
+        }
+        max_speed = max_speed * 0.8;
+        _max_dist_per_timestep = 0.00894 * max_speed;
+        _delta_s_maxspeed = _horizon * _max_dist_per_timestep;
+        if (path_fail_count > 3) {
+          min_cost = 99998;
+          min_cost_i = 0;
+        }
       }
 //      double min_s = trajectory_coefficients[0].first.eval(_horizon);
 //      int min_s_i = 0;
