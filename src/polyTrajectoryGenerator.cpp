@@ -45,13 +45,14 @@ double PolyTrajectoryGenerator::collision_cost(pair<Polynomial, Polynomial> cons
       vector<double> traffic_state = vehicles[i].state_at(t); // {s,d}
       
       double dif_s = traffic_state[0] - ego_s;
+      double dif_d = abs(traffic_state[1] - ego_d);
       // Ignore (potentially faster) vehicles from behind or that have fallen behind
       // Tried it and ego moved out of their way, often hitting slower traffic. Not fun.
-      if (dif_s < -5)
+      if (((dif_s < -5) && (dif_d < 2.0)) || (((dif_s < -15) && (dif_d > 2.0))))
         break;
       
       dif_s = abs(dif_s);
-      double dif_d = abs(traffic_state[1] - ego_d);
+      
       
       // make the envelope a little wider to stay "out of trouble"
       if ((dif_s <= _car_col_length * 5.0) && (dif_d <= _car_col_width * 3.0))
@@ -301,13 +302,13 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
         // left change
         if (closest_veh_i[0] != -1) {
           vector<double> closest_veh_left = vehicles[closest_veh_i[0]].get_s();
-          if ((closest_veh_s[1] * 1.025 >= closest_veh_left[1]) && (closest_veh_left[0] <  closest_veh_s[0] + 60)) {
+          if ((closest_veh_s[1] * 1.05 >= closest_veh_left[1]) && (closest_veh_left[0] <  closest_veh_s[0] + 50)) {
             change_left = false;
           }
         }
         if (closest_veh_i[2] != -1) {
           vector<double> closest_veh_right = vehicles[closest_veh_i[2]].get_s();
-          if ((closest_veh_s[1] * 1.025 >= closest_veh_right[1]) && (closest_veh_right[0] <  closest_veh_s[0] + 60)) {
+          if ((closest_veh_s[1] * 1.05 >= closest_veh_right[1]) && (closest_veh_right[0] <  closest_veh_s[0] + 50)) {
             change_right = false;
           }
         }        
@@ -357,7 +358,6 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
   vector<pair<Polynomial, Polynomial>> trajectory_coefficients;
   int path_fail_count = 0;
   while (min_cost == 999999) {
-    min_cost_i = 0;
     goal_points.clear();
     // #########################################
     // GENERATE GOALPOINTS
@@ -515,6 +515,7 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
 
     // choose least-cost trajectory
     min_cost = traj_costs[0];
+    min_cost_i = 0;
     for (int i = 1; i < trajectory_coefficients.size(); i++) {
       if (traj_costs[i] < min_cost) {
         min_cost = traj_costs[i];
@@ -531,10 +532,12 @@ vector<vector<double>> PolyTrajectoryGenerator::generate_trajectory(vector<doubl
       
       // if it fails frequently, invoke slowdown
       if (path_fail_count > 2) {
-        if (go_straight_follow_lead) {
-          vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
-          max_speed = lead_s[1];
-        }
+//        if (go_straight_follow_lead) {
+//          if (closest_veh_i[cur_lane_i] != -1) {
+//            vector<double> lead_s = vehicles[closest_veh_i[cur_lane_i]].get_s();
+//            max_speed = lead_s[1];
+//          }
+//        }
         max_speed = max_speed * 0.8;
         _max_dist_per_timestep = 0.00894 * max_speed;
         _delta_s_maxspeed = _horizon * _max_dist_per_timestep;
